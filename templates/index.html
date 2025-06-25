@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image to PDF Converter</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">Image to PDF Converter</h1>
+
+        <p class="text-gray-600 mb-6">Select one or more images (PNG, JPG, GIF, BMP, WebP) to convert them into a single PDF document. Each image will be placed on a new page.</p>
+
+        <div class="mb-6">
+            <label for="imageUpload" class="block text-sm font-medium text-gray-700 mb-2">
+                Upload Images
+            </label>
+            <input
+                type="file"
+                id="imageUpload"
+                name="images"
+                accept="image/png, image/jpeg, image/gif, image/bmp, image/webp"
+                multiple
+                class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+            <p class="mt-2 text-xs text-gray-500" id="fileCount">No files chosen</p>
+        </div>
+
+        <button
+            id="convertBtn"
+            class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 transition duration-300 ease-in-out shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+        >
+            Convert to PDF
+        </button>
+
+        <div id="loadingIndicator" class="hidden mt-4 text-blue-600 font-medium">
+            Converting... Please wait.
+        </div>
+        <div id="messageBox" class="mt-4 p-3 rounded-md text-sm hidden"></div>
+    </div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const convertBtn = document.getElementById('convertBtn');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const messageBox = document.getElementById('messageBox');
+        const fileCount = document.getElementById('fileCount');
+
+        imageUpload.addEventListener('change', () => {
+            if (imageUpload.files.length > 0) {
+                fileCount.textContent = `${imageUpload.files.length} file(s) chosen`;
+                // Clear any previous messages
+                messageBox.classList.add('hidden');
+            } else {
+                fileCount.textContent = 'No files chosen';
+            }
+        });
+
+        convertBtn.addEventListener('click', async () => {
+            const files = imageUpload.files;
+            if (files.length === 0) {
+                showMessage('Please select at least one image file.', 'bg-yellow-100 text-yellow-800 border border-yellow-200');
+                return;
+            }
+
+            loadingIndicator.classList.remove('hidden');
+            convertBtn.disabled = true; // Disable button during conversion
+            messageBox.classList.add('hidden'); // Hide previous messages
+
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('images', files[i]);
+            }
+
+            try {
+                const response = await fetch('/convert-to-pdf', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (response.ok) {
+                    // Get filename from headers, or use a default
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    let filename = 'converted_images.pdf';
+                    if (contentDisposition && contentDisposition.includes('filename=')) {
+                        filename = contentDisposition.split('filename=')[1].replace(/['"]/g, '');
+                    }
+
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                    showMessage('PDF conversion successful! Download started.', 'bg-green-100 text-green-800 border border-green-200');
+                } else {
+                    const errorData = await response.json();
+                    showMessage(`Error: ${errorData.error || 'Something went wrong during conversion.'}`, 'bg-red-100 text-red-800 border border-red-200');
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                showMessage(`Network error: ${error.message}. Please try again.`, 'bg-red-100 text-red-800 border border-red-200');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                convertBtn.disabled = false; // Re-enable button
+            }
+        });
+
+        function showMessage(msg, classes) {
+            messageBox.textContent = msg;
+            messageBox.className = `mt-4 p-3 rounded-md text-sm ${classes}`;
+            messageBox.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
