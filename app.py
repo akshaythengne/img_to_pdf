@@ -1,8 +1,9 @@
 import os
-from flask import Flask, request, send_file, render_template
+from flask import Flask, request, send_file, render_template, jsonify
 from PIL import Image # Pillow library for image processing
 from fpdf import FPDF # FPDF library for PDF generation
 import uuid # For generating unique filenames
+import traceback # Import traceback for detailed error logging
 
 # Initialize the Flask application
 app = Flask(__name__)
@@ -77,27 +78,45 @@ def convert_to_pdf():
     Handles image uploads, converts them to a single PDF, and sends the PDF back.
     """
     if 'images' not in request.files:
-        return {"error": "No image files part in the request"}, 400
+        return jsonify({"error": "No image files part in the request"}), 400
 
     uploaded_files = request.files.getlist('images')
     if not uploaded_files:
-        return {"error": "No selected image files"}, 400
+        return jsonify({"error": "No selected image files"}), 400
 
     image_paths = []
     # Save uploaded images temporarily
     for file in uploaded_files:
+        # Skip empty file inputs (e.g., if user selects file input but doesn't choose a file)
+        if file.filename == '':
+            continue 
         if file and allowed_file(file.filename):
             filename = str(uuid.uuid4()) + os.path.splitext(file.filename)[1]
             filepath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filepath)
-            image_paths.append(filepath)
+            try:
+                file.save(filepath)
+                image_paths.append(filepath)
+            except Exception as e:
+                # Log file save errors and return JSON response
+                print(f"Error saving file {file.filename}: {e}")
+                print(traceback.format_exc()) # Print full traceback for debug
+                # Clean up already saved files if one fails
+                for p in image_paths:
+                    if os.path.exists(p):
+                        os.remove(p)
+                return jsonify({"error": f"Failed to save image file {file.filename}: {e}"}), 500
         else:
-            # Handle disallowed file types or empty files
-            # For simplicity, we'll just skip them, but you might want to return an error
-            print(f"Skipping disallowed or empty file: {file.filename}")
+            # Return an error for invalid file types or empty files
+            print(f"Skipping disallowed or empty file: {file.filename}") # Debug print
+            # Ensure cleanup if an invalid file was processed after some valid ones
+            for p in image_paths:
+                if os.path.exists(p):
+                    os.remove(p)
+            return jsonify({"error": f"Invalid file type or empty file: {file.filename}. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+
 
     if not image_paths:
-        return {"error": "No valid image files provided for conversion."}, 400
+        return jsonify({"error": "No valid image files provided for conversion."}), 400
 
     # Create a unique PDF filename
     pdf_filename = f"converted_images_{uuid.uuid4()}.pdf"
@@ -111,42 +130,58 @@ def convert_to_pdf():
         # Add each image to a new page in the PDF
         for img_path in image_paths:
             pdf.add_page()
-            # Calculate position and dimensions to fit image
-            x, y, w, h = get_image_fit_dimensions(img_path)
-            # Add image to PDF
-            pdf.image(img_path, x=x, y=y, w=w, h=h)
+            try:
+                # Calculate position and dimensions to fit image
+                x, y, w, h = get_image_fit_dimensions(img_path)
+                # Add image to PDF
+                pdf.image(img_path, x=x, y=y, w=w, h=h)
+            except Exception as img_err:
+                # Log specific image processing errors for this image
+                print(f"Error processing image {img_path}: {img_err}")
+                print(traceback.format_exc()) # Print full traceback for debug
+                # Re-raise to be caught by the outer try-except, which will then send a JSON error
+                raise img_err 
     except Exception as e:
-        # Catch any errors during image processing or PDF creation
-        print(f"Error during PDF generation: {e}")
-        return {"error": f"Failed to process images or create PDF: {e}"}, 500
+        # This catches errors from get_image_fit_dimensions, pdf.image, or re-raised errors
+        print(f"Overall PDF generation error: {e}")
+        print(traceback.format_exc()) # Print full traceback
+        # Ensure cleanup of any temp files from successful uploads
+        for p in image_paths:
+            if os.path.exists(p):
+                os.remove(p)
+        return jsonify({"error": f"Failed to process images or create PDF: {e}"}), 500
     finally:
-        # Clean up uploaded image files
+        # Ensure cleanup of all uploaded image files, regardless of success or failure
         for img_path in image_paths:
             if os.path.exists(img_path):
                 os.remove(img_path)
 
-    # Save the PDF to the output folder
-    pdf.output(pdf_filepath)
+    try:
+        # Save the PDF to the output folder
+        pdf.output(pdf_filepath)
+        
+        # Send the generated PDF file to the client
+        # Changed 'download_name' to 'attachment_filename' for compatibility with older Flask versions (pre-2.0)
+        response = send_file(pdf_filepath, as_attachment=True, attachment_filename=pdf_filename, mimetype='application/pdf')
 
-    # Send the generated PDF file to the client
-    response = send_file(pdf_filepath, as_attachment=True, download_name=pdf_filename, mimetype='application/pdf')
-
-    # Optional: Schedule cleanup of the generated PDF after it's sent
-    # For a real application, consider a more robust cleanup mechanism (e.g., a background job)
-    # For local usage, manual cleanup of temp_pdfs folder is fine.
-    # If the response is successfully sent, you can attempt to delete the file immediately.
-    # Note: send_file might keep the file open until response is fully sent,
-    # so a slight delay or a separate cleanup script might be needed for production.
-    # For this local demo, it's generally fine.
-    @response.call_on_close
-    def cleanup():
-        if os.path.exists(pdf_filepath):
-            os.remove(pdf_filepath)
-            print(f"Cleaned up {pdf_filepath}")
-
-    return response
+        # Optional: Schedule cleanup of the generated PDF after it's sent
+        # For a real application, consider a more robust cleanup mechanism (e.g., a background job)
+        @response.call_on_close
+        def cleanup():
+            if os.path.exists(pdf_filepath):
+                os.remove(pdf_filepath)
+                print(f"Cleaned up {pdf_filepath}")
+        
+        return response
+    except Exception as e:
+        # Handle errors specifically during PDF output (saving to disk) or sending the file
+        print(f"Error during PDF output or sending: {e}")
+        print(traceback.format_exc())
+        return jsonify({"error": f"Failed to finalize or send PDF: {e}"}), 500
 
 # Run the Flask app
 if __name__ == '__main__':
     # You can change the port if needed
+    # debug=True allows for automatic reloading on code changes and more detailed error messages
     app.run(debug=True, port=5000)
+
