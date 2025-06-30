@@ -1,9 +1,13 @@
 import os
-from flask import Flask, request, send_file, render_template, jsonify
+from flask import Flask, request, send_file, render_template, jsonify, make_response
 from PIL import Image # Pillow library for image processing
 from fpdf import FPDF # FPDF library for PDF generation
 import uuid # For generating unique filenames
 import traceback # Import traceback for detailed error logging
+from PyPDF2 import PdfMerger, PdfReader, PdfWriter
+import io
+import smtplib
+from email.message import EmailMessage
 
 # Initialize the Flask application
 app = Flask(__name__)
@@ -74,110 +78,160 @@ def index():
 
 @app.route('/convert-to-pdf', methods=['POST'])
 def convert_to_pdf():
-    """
-    Handles image uploads, converts them to a single PDF, and sends the PDF back.
-    """
-    if 'images' not in request.files:
-        return jsonify({"error": "No image files part in the request"}), 400
+    # --- Get options from form ---
+    layout = request.form.get('layout', 'A4-P')
+    compress = request.form.get('compress', 'false') == 'true'
+    resize = request.form.get('resize', 'false') == 'true'
+    watermark = request.form.get('watermark', '')
+    password = request.form.get('password', '')
+    email = request.form.get('email', '')
 
+    # Layout parsing
+    if layout.startswith('A4'):
+        page_format = 'A4'
+    else:
+        page_format = 'Letter'
+    orientation = 'L' if layout.endswith('-L') else 'P'
+
+    # --- Handle images ---
     uploaded_files = request.files.getlist('images')
-    if not uploaded_files:
-        return jsonify({"error": "No selected image files"}), 400
-
     image_paths = []
-    # Save uploaded images temporarily
     for file in uploaded_files:
-        # Skip empty file inputs (e.g., if user selects file input but doesn't choose a file)
         if file.filename == '':
-            continue 
+            continue
         if file and allowed_file(file.filename):
             filename = str(uuid.uuid4()) + os.path.splitext(file.filename)[1]
             filepath = os.path.join(UPLOAD_FOLDER, filename)
-            try:
-                file.save(filepath)
-                image_paths.append(filepath)
-            except Exception as e:
-                # Log file save errors and return JSON response
-                print(f"Error saving file {file.filename}: {e}")
-                print(traceback.format_exc()) # Print full traceback for debug
-                # Clean up already saved files if one fails
-                for p in image_paths:
-                    if os.path.exists(p):
-                        os.remove(p)
-                return jsonify({"error": f"Failed to save image file {file.filename}: {e}"}), 500
-        else:
-            # Return an error for invalid file types or empty files
-            print(f"Skipping disallowed or empty file: {file.filename}") # Debug print
-            # Ensure cleanup if an invalid file was processed after some valid ones
-            for p in image_paths:
-                if os.path.exists(p):
-                    os.remove(p)
-            return jsonify({"error": f"Invalid file type or empty file: {file.filename}. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+            file.save(filepath)
+            image_paths.append(filepath)
 
+    # --- Handle PDF merge ---
+    pdf_files = request.files.getlist('pdfs')
+    pdf_paths = []
+    for file in pdf_files:
+        if file.filename and file.filename.lower().endswith('.pdf'):
+            filename = str(uuid.uuid4()) + '.pdf'
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            pdf_paths.append(filepath)
 
-    if not image_paths:
-        return jsonify({"error": "No valid image files provided for conversion."}), 400
+    if not image_paths and not pdf_paths:
+        return jsonify({"error": "No valid image or PDF files provided for conversion."}), 400
 
-    # Create a unique PDF filename
-    pdf_filename = f"converted_images_{uuid.uuid4()}.pdf"
-    pdf_filepath = os.path.join(PDF_OUTPUT_FOLDER, pdf_filename)
-
-    # Initialize PDF document
-    # 'P' for portrait, 'mm' for millimeters, 'A4' for page size
-    pdf = FPDF(unit='mm', format='A4')
-
+    # --- Create PDF from images ---
+    pdf = FPDF(orientation=orientation, unit='mm', format=page_format)
     try:
-        # Add each image to a new page in the PDF
         for img_path in image_paths:
             pdf.add_page()
-            try:
-                # Calculate position and dimensions to fit image
-                x, y, w, h = get_image_fit_dimensions(img_path)
-                # Add image to PDF
-                pdf.image(img_path, x=x, y=y, w=w, h=h)
-            except Exception as img_err:
-                # Log specific image processing errors for this image
-                print(f"Error processing image {img_path}: {img_err}")
-                print(traceback.format_exc()) # Print full traceback for debug
-                # Re-raise to be caught by the outer try-except, which will then send a JSON error
-                raise img_err 
-    except Exception as e:
-        # This catches errors from get_image_fit_dimensions, pdf.image, or re-raised errors
-        print(f"Overall PDF generation error: {e}")
-        print(traceback.format_exc()) # Print full traceback
-        # Ensure cleanup of any temp files from successful uploads
-        for p in image_paths:
-            if os.path.exists(p):
-                os.remove(p)
-        return jsonify({"error": f"Failed to process images or create PDF: {e}"}), 500
+            x, y, w, h = get_image_fit_dimensions(img_path)
+            with Image.open(img_path) as img:
+                if compress:
+                    img = img.convert('RGB').resize((int(img.width*0.7), int(img.height*0.7)))
+                    img.save(img_path, optimize=True, quality=60)
+                if resize:
+                    img = img.resize((int(w*3.78), int(h*3.78))) # 1mm ≈ 3.78px
+                    img.save(img_path)
+            pdf.image(img_path, x=x, y=y, w=w, h=h)
+            if watermark:
+                pdf.set_xy(x, y+h-10)
+                pdf.set_text_color(150,150,150)
+                pdf.set_font('Arial', 'I', 12)
+                pdf.cell(w, 10, watermark, 0, 0, 'C')
     finally:
-        # Ensure cleanup of all uploaded image files, regardless of success or failure
         for img_path in image_paths:
-            if os.path.exists(img_path):
+            try:
                 os.remove(img_path)
+            except Exception as e:
+                print(f"Could not delete {img_path}: {e}")
 
+    # --- Save to BytesIO for merging and password ---
+    pdf_bytes = io.BytesIO(pdf.output(dest='S').encode('latin1'))
+    pdf_bytes.seek(0)
+
+    # --- Merge with uploaded PDFs if any ---
+    merger = PdfMerger()
+    open_pdfs = []
     try:
-        # Save the PDF to the output folder
-        pdf.output(pdf_filepath)
-        
-        # Send the generated PDF file to the client
-        # Changed 'download_name' to 'attachment_filename' for compatibility with older Flask versions (pre-2.0)
-        response = send_file(pdf_filepath, as_attachment=True, attachment_filename=pdf_filename, mimetype='application/pdf')
+        for path in pdf_paths:
+            f = open(path, 'rb')
+            open_pdfs.append(f)
+            merger.append(f)
+        merger.append(pdf_bytes)
+        merged_bytes = io.BytesIO()
+        merger.write(merged_bytes)
+        merger.close()
+        merged_bytes.seek(0)
+    finally:
+        for f in open_pdfs:
+            try:
+                f.close()
+            except Exception as e:
+                print(f"Could not close PDF file: {e}")
+        for path in pdf_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as e:
+                print(f"Could not delete {path}: {e}")
 
-        # Optional: Schedule cleanup of the generated PDF after it's sent
-        # For a real application, consider a more robust cleanup mechanism (e.g., a background job)
-        @response.call_on_close
-        def cleanup():
-            if os.path.exists(pdf_filepath):
-                os.remove(pdf_filepath)
-                print(f"Cleaned up {pdf_filepath}")
-        
-        return response
-    except Exception as e:
-        # Handle errors specifically during PDF output (saving to disk) or sending the file
-        print(f"Error during PDF output or sending: {e}")
-        print(traceback.format_exc())
-        return jsonify({"error": f"Failed to finalize or send PDF: {e}"}), 500
+    # --- Password protection ---
+    if password:
+        reader = PdfReader(merged_bytes)
+        writer = PdfWriter()
+        for page in reader.pages:
+            writer.add_page(page)
+        writer.encrypt(password)
+        protected_bytes = io.BytesIO()
+        writer.write(protected_bytes)
+        protected_bytes.seek(0)
+        final_pdf = protected_bytes
+    else:
+        final_pdf = merged_bytes
+
+    # --- Save final PDF to disk for download and email ---
+    pdf_filename = f"converted_images_{uuid.uuid4()}.pdf"
+    pdf_filepath = os.path.join(PDF_OUTPUT_FOLDER, pdf_filename)
+    with open(pdf_filepath, 'wb') as f:
+        f.write(final_pdf.read())
+    final_pdf.seek(0)
+
+    # --- Email PDF if requested ---
+    if email:
+        try:
+            msg = EmailMessage()
+            msg['Subject'] = 'Your Converted PDF'
+            msg['From'] = 'noreply@example.com'
+            msg['To'] = email
+            msg.set_content('Your PDF is attached.')
+            final_pdf.seek(0)
+            msg.add_attachment(final_pdf.read(), maintype='application', subtype='pdf', filename=pdf_filename)
+            # NOTE: Configure your SMTP server here
+            with smtplib.SMTP('localhost') as s:
+                s.send_message(msg)
+        except Exception as e:
+            print(f"Email send error: {e}")
+
+    # --- Send PDF to client ---
+    response = send_file(pdf_filepath, as_attachment=True, download_name=pdf_filename, mimetype='application/pdf')
+    @response.call_on_close
+    def cleanup():
+        if os.path.exists(pdf_filepath):
+            os.remove(pdf_filepath)
+    return response
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # If the request is for HTML, return default
+    if not request.path.startswith('/convert-to-pdf'):
+        return e
+    # Otherwise, return JSON error
+    import traceback
+    response = make_response(jsonify({
+        "error": str(e),
+        "trace": traceback.format_exc()
+    }), 500)
+    response.headers["Content-Type"] = "application/json"
+    return response
 
 # Run the Flask app
 if __name__ == '__main__':

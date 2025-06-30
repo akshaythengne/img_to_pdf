@@ -1,0 +1,4 @@
+Flask
+Pillow
+fpdf
+PyPDF2

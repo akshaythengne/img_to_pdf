@@ -3,136 +3,338 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image to PDF Converter</title>
-    <!-- Tailwind CSS CDN -->
+    <title>Image to PDF Gameify</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <script>
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
+                        sans: ['Inter', 'Segoe UI', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#6366f1',
+                        accent: '#f472b6',
+                        bg: '#f8fafc',
+                        card: '#fff',
+                        darkbg: '#18181b',
+                        darkcard: '#23232b',
+                        gold: '#ffd700',
+                        emerald: '#10b981',
                     },
                 },
             },
         };
     </script>
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6; /* Light gray background */
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { min-height: 100vh; min-width: 100vw; font-family: 'Inter', 'Segoe UI', sans-serif; }
+        .animated-bg {
+            position: fixed; inset: 0; z-index: 0;
+            background: radial-gradient(circle at 20% 30%, #6366f1 0%, #f472b6 40%, #f8fafc 100%);
+            animation: bgmove 12s linear infinite alternate;
         }
+        @keyframes bgmove {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 100% 50%; }
+        }
+        .glass {
+            background: rgba(255,255,255,0.85);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.18);
+            backdrop-filter: blur(8px);
+        }
+        .dragging { opacity: 0.5; }
+        .preview-card {
+            transition: box-shadow 0.2s, transform 0.2s;
+            animation: dropin 0.5s cubic-bezier(.68,-0.55,.27,1.55);
+        }
+        @keyframes dropin {
+            0% { transform: scale(0.7) translateY(-40px); opacity: 0; }
+            80% { transform: scale(1.1) translateY(10px); opacity: 1; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .step-active { color: #6366f1; font-weight: bold; }
+        .step-complete { color: #10b981; font-weight: bold; }
+        .badge { background: #ffd700; color: #23232b; border-radius: 9999px; padding: 0.25em 0.75em; font-weight: bold; margin-left: 0.5em; }
     </style>
 </head>
-<body class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center">
-        <h1 class="text-3xl font-bold text-gray-800 mb-6">Image to PDF Converter</h1>
-
-        <p class="text-gray-600 mb-6">Select one or more images (PNG, JPG, GIF, BMP, WebP) to convert them into a single PDF document. Each image will be placed on a new page.</p>
-
-        <div class="mb-6">
-            <label for="imageUpload" class="block text-sm font-medium text-gray-700 mb-2">
-                Upload Images
-            </label>
-            <input
-                type="file"
-                id="imageUpload"
-                name="images"
-                accept="image/png, image/jpeg, image/gif, image/bmp, image/webp"
-                multiple
-                class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
-            <p class="mt-2 text-xs text-gray-500" id="fileCount">No files chosen</p>
+<body class="w-full h-full min-h-screen min-w-screen flex flex-col items-center justify-center overflow-x-hidden overflow-y-auto">
+    <div class="animated-bg"></div>
+    <main class="relative z-10 flex flex-col items-center justify-center w-full h-full min-h-screen">
+        <div class="glass dark:bg-darkcard p-10 rounded-3xl shadow-2xl w-full max-w-4xl mx-auto mt-8 mb-8 flex flex-col items-center">
+            <div class="flex justify-between items-center w-full mb-6">
+                <h1 class="text-5xl font-extrabold text-primary dark:text-accent tracking-tight flex items-center gap-3">
+                    <i class="fa-solid fa-trophy text-gold animate-bounce"></i> Image to PDF <span class="hidden md:inline">Gameify</span>
+                </h1>
+                <button id="themeToggle" class="ml-4 px-3 py-1 rounded-lg bg-primary/10 dark:bg-accent/10 text-primary dark:text-accent text-2xl shadow hover:bg-primary/20 dark:hover:bg-accent/20 transition"><i class="fa-solid fa-moon"></i></button>
+            </div>
+            <div class="w-full flex flex-col md:flex-row gap-6 items-center justify-between mb-8">
+                <div class="flex-1 flex flex-col gap-2">
+                    <div class="flex gap-2 items-center">
+                        <span class="text-lg font-semibold text-gray-700 dark:text-gray-200"><i class="fa-solid fa-images mr-1"></i>Upload Images</span>
+                        <span id="badgeImages" class="badge hidden"></span>
+                    </div>
+                    <input type="file" id="imageUpload" name="images" accept="image/*" multiple class="block w-full text-base text-gray-900 border border-primary/30 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-base file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20" />
+                </div>
+                <div class="flex flex-col gap-2 items-center">
+                    <button id="cameraBtn" class="bg-accent text-white px-6 py-3 rounded-xl font-semibold shadow hover:bg-primary transition flex items-center gap-2 text-lg"><i class="fa-solid fa-camera"></i> Camera</button>
+                </div>
+                <div class="flex-1 flex flex-col gap-2">
+                    <div class="flex gap-2 items-center">
+                        <span class="text-lg font-semibold text-gray-700 dark:text-gray-200"><i class="fa-solid fa-file-pdf mr-1"></i>Merge PDF</span>
+                        <span id="badgePDFs" class="badge hidden"></span>
+                    </div>
+                    <input type="file" id="pdfUpload" name="pdfs" accept="application/pdf" multiple class="block w-full text-base text-gray-900 border border-primary/30 rounded-lg cursor-pointer bg-gray-50 focus:outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-base file:font-semibold file:bg-accent/10 file:text-accent hover:file:bg-accent/20" />
+                </div>
+            </div>
+            <!-- Removed progress steps for a cleaner, more intuitive UI -->
+            <!-- Drag-and-drop arrangement is still supported in the preview area -->
+            <div id="previewContainer" class="mb-8 flex flex-wrap gap-8 justify-center min-h-[140px] w-full"></div>
+            <div class="mb-8 flex flex-wrap gap-4 justify-center items-center w-full">
+                <select id="layoutSelect" class="border border-primary/30 rounded-lg px-4 py-3 shadow-sm focus:ring-2 focus:ring-primary/40 text-lg">
+                    <option value="A4-P">A4 Portrait</option>
+                    <option value="A4-L">A4 Landscape</option>
+                    <option value="Letter-P">Letter Portrait</option>
+                    <option value="Letter-L">Letter Landscape</option>
+                </select>
+                <label class="flex items-center gap-2 text-gray-700 dark:text-gray-200 font-medium text-lg">
+                    <input type="checkbox" id="compressCheckbox" class="form-checkbox accent-primary"> Compress Images
+                </label>
+                <label class="flex items-center gap-2 text-gray-700 dark:text-gray-200 font-medium text-lg">
+                    <input type="checkbox" id="resizeCheckbox" class="form-checkbox accent-primary"> Resize to Fit
+                </label>
+                <input type="text" id="watermarkInput" placeholder="Watermark text (optional)" class="border border-primary/30 rounded-lg px-4 py-3 shadow-sm focus:ring-2 focus:ring-primary/40 text-lg" />
+                <input type="password" id="pdfPassword" placeholder="PDF Password (optional)" class="border border-primary/30 rounded-lg px-4 py-3 shadow-sm focus:ring-2 focus:ring-primary/40 text-lg" />
+            </div>
+            <div class="mb-8 flex flex-wrap gap-4 justify-center items-center w-full">
+                <input type="email" id="emailInput" placeholder="Email PDF to (optional)" class="border border-primary/30 rounded-lg px-4 py-3 shadow-sm focus:ring-2 focus:ring-primary/40 text-lg" />
+            </div>
+            <button id="convertBtn" class="w-full bg-gradient-to-r from-primary to-accent text-white py-5 px-10 rounded-2xl font-extrabold text-2xl shadow-xl hover:from-accent hover:to-primary transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-opacity-75 flex items-center justify-center gap-3"><i class="fa-solid fa-file-arrow-down"></i> Convert to PDF</button>
+            <div id="loadingIndicator" class="hidden mt-8 text-primary font-extrabold flex items-center justify-center gap-3 text-xl"><i class="fa-solid fa-spinner fa-spin"></i> Converting... Please wait.</div>
+            <div id="messageBox" class="mt-8 p-6 rounded-2xl text-xl hidden"></div>
+            <div id="recentFiles" class="mt-10 text-left w-full"></div>
         </div>
-
-        <button
-            id="convertBtn"
-            class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 transition duration-300 ease-in-out shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
-        >
-            Convert to PDF
-        </button>
-
-        <div id="loadingIndicator" class="hidden mt-4 text-blue-600 font-medium">
-            Converting... Please wait.
+        <!-- Camera Modal -->
+        <div id="cameraModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 hidden">
+            <div class="bg-white dark:bg-darkcard p-8 rounded-2xl shadow-2xl flex flex-col items-center">
+                <video id="cameraVideo" autoplay playsinline class="w-80 h-64 bg-black mb-4 rounded-xl shadow"></video>
+                <button id="captureBtn" class="bg-primary text-white px-8 py-3 rounded-xl font-semibold mb-2 shadow hover:bg-accent transition text-lg"><i class="fa-solid fa-circle-dot"></i> Capture</button>
+                <button id="closeCameraBtn" class="text-gray-600 dark:text-gray-200 mt-2">Close</button>
+            </div>
         </div>
-        <div id="messageBox" class="mt-4 p-3 rounded-md text-sm hidden"></div>
-    </div>
-
+    </main>
     <script>
-        const imageUpload = document.getElementById('imageUpload');
-        const convertBtn = document.getElementById('convertBtn');
-        const loadingIndicator = document.getElementById('loadingIndicator');
-        const messageBox = document.getElementById('messageBox');
-        const fileCount = document.getElementById('fileCount');
+    // --- Theme Toggle ---
+    const themeToggle = document.getElementById('themeToggle');
+    themeToggle.onclick = () => {
+        document.documentElement.classList.toggle('dark');
+        themeToggle.innerHTML = document.documentElement.classList.contains('dark') ? '<i class="fa-solid fa-sun"></i>' : '<i class="fa-solid fa-moon"></i>';
+    };
 
-        imageUpload.addEventListener('change', () => {
-            if (imageUpload.files.length > 0) {
-                fileCount.textContent = `${imageUpload.files.length} file(s) chosen`;
-                // Clear any previous messages
-                messageBox.classList.add('hidden');
-            } else {
-                fileCount.textContent = 'No files chosen';
-            }
-        });
-
-        convertBtn.addEventListener('click', async () => {
-            const files = imageUpload.files;
-            if (files.length === 0) {
-                showMessage('Please select at least one image file.', 'bg-yellow-100 text-yellow-800 border border-yellow-200');
-                return;
-            }
-
-            loadingIndicator.classList.remove('hidden');
-            convertBtn.disabled = true; // Disable button during conversion
-            messageBox.classList.add('hidden'); // Hide previous messages
-
-            const formData = new FormData();
-            for (let i = 0; i < files.length; i++) {
-                formData.append('images', files[i]);
-            }
-
-            try {
-                const response = await fetch('/convert-to-pdf', {
-                    method: 'POST',
-                    body: formData,
+    // --- Image Preview & Reordering ---
+    const imageUpload = document.getElementById('imageUpload');
+    const previewContainer = document.getElementById('previewContainer');
+    const badgeImages = document.getElementById('badgeImages');
+    let imageFiles = [];
+    let score = 0;
+    let dragSrcIdx = null;
+    function updatePreview() {
+        previewContainer.innerHTML = '';
+        imageFiles.forEach((file, idx) => {
+            const reader = new FileReader();
+            reader.onload = e => {
+                const div = document.createElement('div');
+                div.className = 'relative preview-card group w-32 h-32 flex flex-col items-center justify-center bg-card dark:bg-darkcard rounded-2xl shadow-lg border-4 border-primary/20 dark:border-accent/20 overflow-hidden';
+                div.draggable = true;
+                div.addEventListener('dragstart', ev => {
+                    dragSrcIdx = idx;
+                    div.classList.add('dragging');
                 });
-
-                if (response.ok) {
-                    // Get filename from headers, or use a default
-                    const contentDisposition = response.headers.get('Content-Disposition');
-                    let filename = 'converted_images.pdf';
-                    if (contentDisposition && contentDisposition.includes('filename=')) {
-                        filename = contentDisposition.split('filename=')[1].replace(/['"]/g, '');
-                    }
-
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    window.URL.revokeObjectURL(url);
-                    showMessage('PDF conversion successful! Download started.', 'bg-green-100 text-green-800 border border-green-200');
-                } else {
-                    const errorData = await response.json();
-                    showMessage(`Error: ${errorData.error || 'Something went wrong during conversion.'}`, 'bg-red-100 text-red-800 border border-red-200');
-                }
-            } catch (error) {
-                console.error('Fetch error:', error);
-                showMessage(`Network error: ${error.message}. Please try again.`, 'bg-red-100 text-red-800 border border-red-200');
-            } finally {
-                loadingIndicator.classList.add('hidden');
-                convertBtn.disabled = false; // Re-enable button
-            }
+                div.addEventListener('dragend', () => {
+                    dragSrcIdx = null;
+                    div.classList.remove('dragging');
+                });
+                div.addEventListener('dragover', ev => {
+                    ev.preventDefault();
+                });
+                div.addEventListener('drop', ev => {
+                    ev.preventDefault();
+                    if (dragSrcIdx === null || dragSrcIdx === idx) return;
+                    const moved = imageFiles.splice(dragSrcIdx, 1)[0];
+                    imageFiles.splice(idx, 0, moved);
+                    updatePreview();
+                });
+                div.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover rounded-2xl"><button class='absolute top-2 right-2 bg-red-600 text-white rounded-full px-2 py-1 text-xs shadow-lg opacity-80 hover:opacity-100 transition' onclick='removeImage(${idx})'><i class='fa-solid fa-xmark'></i></button>`;
+                previewContainer.appendChild(div);
+            };
+            reader.readAsDataURL(file);
         });
-
-        function showMessage(msg, classes) {
-            messageBox.textContent = msg;
-            messageBox.className = `mt-4 p-3 rounded-md text-sm ${classes}`;
-            messageBox.classList.remove('hidden');
+        if (imageFiles.length > 0) {
+            badgeImages.textContent = `+${imageFiles.length * 10} pts!`;
+            badgeImages.classList.remove('hidden');
+            score = imageFiles.length * 10;
+            if (imageFiles.length === 3) showAchievement('Triple Upload!');
+        } else {
+            badgeImages.classList.add('hidden');
         }
+    }
+    window.removeImage = idx => {
+        imageFiles.splice(idx, 1);
+        updatePreview();
+    };
+    imageUpload.onchange = () => {
+        imageFiles = Array.from(imageUpload.files);
+        updatePreview();
+        if (imageFiles.length > 0) confetti({ particleCount: 60, spread: 70, origin: { y: 0.7 } });
+    };
+
+    // --- Camera Capture ---
+    const cameraBtn = document.getElementById('cameraBtn');
+    const cameraModal = document.getElementById('cameraModal');
+    const cameraVideo = document.getElementById('cameraVideo');
+    const captureBtn = document.getElementById('captureBtn');
+    const closeCameraBtn = document.getElementById('closeCameraBtn');
+    let cameraStream = null;
+    cameraBtn.onclick = async () => {
+        cameraModal.classList.remove('hidden');
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        cameraVideo.srcObject = cameraStream;
+    };
+    closeCameraBtn.onclick = () => {
+        cameraModal.classList.add('hidden');
+        if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+    };
+    captureBtn.onclick = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = cameraVideo.videoWidth;
+        canvas.height = cameraVideo.videoHeight;
+        canvas.getContext('2d').drawImage(cameraVideo, 0, 0);
+        canvas.toBlob(blob => {
+            const file = new File([blob], `camera_${Date.now()}.png`, { type: 'image/png' });
+            imageFiles.push(file);
+            updatePreview();
+            confetti({ particleCount: 80, spread: 90, origin: { y: 0.7 } });
+            showAchievement('Camera Snap!');
+        }, 'image/png');
+    };
+
+    // --- PDF Merge ---
+    const pdfUpload = document.getElementById('pdfUpload');
+    const badgePDFs = document.getElementById('badgePDFs');
+    let pdfFiles = [];
+    pdfUpload.onchange = () => {
+        pdfFiles = Array.from(pdfUpload.files);
+        if (pdfFiles.length > 0) {
+            badgePDFs.textContent = `+${pdfFiles.length * 5} pts!`;
+            badgePDFs.classList.remove('hidden');
+            score += pdfFiles.length * 5;
+            showAchievement('PDF Merge!');
+            confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 } });
+        } else {
+            badgePDFs.classList.add('hidden');
+        }
+    };
+
+    // --- Convert Button ---
+    const convertBtn = document.getElementById('convertBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const messageBox = document.getElementById('messageBox');
+    const layoutSelect = document.getElementById('layoutSelect');
+    const compressCheckbox = document.getElementById('compressCheckbox');
+    const resizeCheckbox = document.getElementById('resizeCheckbox');
+    const watermarkInput = document.getElementById('watermarkInput');
+    const pdfPassword = document.getElementById('pdfPassword');
+    const emailInput = document.getElementById('emailInput');
+    convertBtn.onclick = async () => {
+        if (imageFiles.length === 0 && pdfFiles.length === 0) {
+            showMessage('Please select at least one image or PDF file.', 'bg-yellow-100 text-yellow-800 border border-yellow-200');
+            return;
+        }
+        //setStep(3);
+        loadingIndicator.classList.remove('hidden');
+        convertBtn.disabled = true;
+        messageBox.classList.add('hidden');
+        const formData = new FormData();
+        imageFiles.forEach(f => formData.append('images', f));
+        pdfFiles.forEach(f => formData.append('pdfs', f));
+        formData.append('layout', layoutSelect.value);
+        formData.append('compress', compressCheckbox.checked);
+        formData.append('resize', resizeCheckbox.checked);
+        formData.append('watermark', watermarkInput.value);
+        formData.append('password', pdfPassword.value);
+        formData.append('email', emailInput.value);
+        try {
+            const response = await fetch('/convert-to-pdf', {
+                method: 'POST',
+                body: formData,
+            });
+            if (response.ok) {
+                //setStep(4);
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'converted_images.pdf';
+                if (contentDisposition && contentDisposition.includes('filename=')) {
+                    filename = contentDisposition.split('filename=')[1].replace(/['"]/g, '');
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                showMessage('🎉 PDF conversion successful! Download started. <span class="badge">+50 pts!</span>', 'bg-emerald-100 text-emerald-800 border border-emerald-200');
+                addRecentFile(filename);
+                score += 50;
+                confetti({ particleCount: 120, spread: 120, origin: { y: 0.5 } });
+                showAchievement('PDF Master!');
+            } else {
+                //setStep(2);
+                const errorData = await response.json();
+                showMessage(`Error: ${errorData.error || 'Something went wrong during conversion.'}`, 'bg-red-100 text-red-800 border border-red-200');
+            }
+        } catch (error) {
+            //setStep(2);
+            console.error('Fetch error:', error);
+            showMessage(`Network error: ${error.message}. Please try again.`, 'bg-red-100 text-red-800 border border-red-200');
+        } finally {
+            loadingIndicator.classList.add('hidden');
+            convertBtn.disabled = false;
+        }
+    };
+    function showMessage(msg, classes) {
+        messageBox.innerHTML = msg;
+        messageBox.className = `mt-8 p-6 rounded-2xl text-xl ${classes}`;
+        messageBox.classList.remove('hidden');
+    }
+    // --- Gamified Achievements ---
+    function showAchievement(text) {
+        const ach = document.createElement('div');
+        ach.className = 'fixed top-8 left-1/2 -translate-x-1/2 bg-gold text-darkcard px-8 py-4 rounded-2xl shadow-2xl text-2xl font-extrabold z-50 animate-bounce';
+        ach.innerHTML = `<i class='fa-solid fa-star mr-2'></i> ${text}`;
+        document.body.appendChild(ach);
+        setTimeout(() => ach.remove(), 2200);
+    }
+    // --- Recent Files ---
+    const recentFilesDiv = document.getElementById('recentFiles');
+    function addRecentFile(filename) {
+        let files = JSON.parse(localStorage.getItem('recentFiles') || '[]');
+        files.unshift({ filename, time: Date.now() });
+        files = files.slice(0, 5);
+        localStorage.setItem('recentFiles', JSON.stringify(files));
+        renderRecentFiles();
+    }
+    function renderRecentFiles() {
+        let files = JSON.parse(localStorage.getItem('recentFiles') || '[]');
+        files = files.filter(f => Date.now() - f.time < 24*60*60*1000); // 24h
+        if (files.length === 0) { recentFilesDiv.innerHTML = ''; return; }
+        recentFilesDiv.innerHTML = '<div class="font-semibold mb-2 text-gray-700 dark:text-gray-200 text-2xl flex items-center gap-2"><i class="fa-solid fa-clock"></i> Recent Files (last 24h):</div>' + files.map(f => `<div class='text-base text-gray-500 dark:text-gray-400'>${f.filename} - ${new Date(f.time).toLocaleString()}</div>`).join('');
+    }
+    renderRecentFiles();
     </script>
 </body>
 </html>
