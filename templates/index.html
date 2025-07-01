@@ -59,6 +59,24 @@
         .step-active { color: #6366f1; font-weight: bold; }
         .step-complete { color: #10b981; font-weight: bold; }
         .badge { background: #ffd700; color: #23232b; border-radius: 9999px; padding: 0.25em 0.75em; font-weight: bold; margin-left: 0.5em; }
+        .toast-message {
+            position: fixed;
+            left: 50%;
+            bottom: 40px;
+            transform: translateX(-50%);
+            z-index: 100;
+            min-width: 320px;
+            max-width: 90vw;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.18);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s, bottom 0.3s;
+        }
+        .toast-message.visible {
+            opacity: 1;
+            pointer-events: auto;
+            bottom: 60px;
+        }
     </style>
 </head>
 <body class="w-full h-full min-h-screen min-w-screen flex flex-col items-center justify-center overflow-x-hidden overflow-y-auto">
@@ -114,7 +132,7 @@
             </div>
             <button id="convertBtn" class="w-full bg-gradient-to-r from-primary to-accent text-white py-5 px-10 rounded-2xl font-extrabold text-2xl shadow-xl hover:from-accent hover:to-primary transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-opacity-75 flex items-center justify-center gap-3"><i class="fa-solid fa-file-arrow-down"></i> Convert to PDF</button>
             <div id="loadingIndicator" class="hidden mt-8 text-primary font-extrabold flex items-center justify-center gap-3 text-xl"><i class="fa-solid fa-spinner fa-spin"></i> Converting... Please wait.</div>
-            <div id="messageBox" class="mt-8 p-6 rounded-2xl text-xl hidden"></div>
+            <div id="messageBox" class="toast-message hidden"></div>
             <div id="recentFiles" class="mt-10 text-left w-full"></div>
         </div>
         <!-- Camera Modal -->
@@ -308,8 +326,12 @@
     };
     function showMessage(msg, classes) {
         messageBox.innerHTML = msg;
-        messageBox.className = `mt-8 p-6 rounded-2xl text-xl ${classes}`;
+        messageBox.className = `toast-message visible ${classes}`;
         messageBox.classList.remove('hidden');
+        setTimeout(() => {
+            messageBox.classList.remove('visible');
+            setTimeout(() => messageBox.classList.add('hidden'), 400);
+        }, 4000);
     }
     // --- Gamified Achievements ---
     function showAchievement(text) {
